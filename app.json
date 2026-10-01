@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "SnakeGame",
-    "slug": "SnakeGame",
+    "slug": "jorgeee",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -37,6 +37,19 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "800acc16-daf9-4829-bc77-7f64afcfdec0"
+      }
+    },
+    "owner": "jorgettes-team",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/800acc16-daf9-4829-bc77-7f64afcfdec0"
     }
   }
 }
