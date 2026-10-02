@@ -1,3 +1,4 @@
+import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
@@ -6,7 +7,6 @@ import {
   PanResponder,
   PanResponderGestureState,
   Platform,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -43,6 +43,7 @@ const INITIAL_SNAKE: Point[] = [
 ];
 
 const BORDER_WIDTH = 3;
+const CORNER_RADIUS = 12;
 
 const BUBBLE_COLORS = [
   "#3b82f6",
@@ -184,10 +185,16 @@ export default function SnakeGame() {
   // Full Screen Touch Controls
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () =>
-        !isMenuOpen && !isGameOver && !isInHome && !isModeModalOpen,
-      onMoveShouldSetPanResponder: () =>
-        !isMenuOpen && !isGameOver && !isInHome && !isModeModalOpen,
+      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponder: (_evt, gestureState) => {
+        const { dx, dy } = gestureState;
+        return Math.abs(dx) > 5 || Math.abs(dy) > 5;
+      },
+      onMoveShouldSetPanResponderCapture: (_evt, gestureState) => {
+        const { dx, dy } = gestureState;
+        return Math.abs(dx) > 5 || Math.abs(dy) > 5;
+      },
       onPanResponderGrant: () => {
         hasSwiped.current = false;
       },
@@ -195,20 +202,13 @@ export default function SnakeGame() {
         _evt: GestureResponderEvent,
         gestureState: PanResponderGestureState,
       ) => {
-        if (
-          hasSwiped.current ||
-          isMenuOpen ||
-          isGameOver ||
-          isInHome ||
-          isModeModalOpen
-        )
-          return;
+        if (hasSwiped.current) return;
 
         const { dx, dy } = gestureState;
         const absX = Math.abs(dx);
         const absY = Math.abs(dy);
 
-        if (Math.max(absX, absY) > 10) {
+        if (Math.max(absX, absY) > 8) {
           if (absX > absY) {
             if (dx > 0) changeDirection(DIRECTIONS.RIGHT);
             else changeDirection(DIRECTIONS.LEFT);
@@ -219,6 +219,7 @@ export default function SnakeGame() {
           hasSwiped.current = true;
         }
       },
+      onPanResponderTerminationRequest: () => false,
     }),
   ).current;
 
@@ -262,7 +263,7 @@ export default function SnakeGame() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isMenuOpen, isInHome, isModeModalOpen]);
 
-  // Main Game Loop - Handles SPEED vs CHILL logic
+  // Main Game Loop
   useEffect(() => {
     if (isGameOver || isMenuOpen || isInHome || isModeModalOpen) return;
 
@@ -312,7 +313,13 @@ export default function SnakeGame() {
           );
           updatedFoods.push(replacement);
 
-          const targetAppleCount = Math.min(5, 1 + Math.floor(nextScore / 30));
+          const maxApples = gameMode === "CHILL" ? 20 : 10;
+          const pointsPerNewApple = gameMode === "CHILL" ? 20 : 30;
+
+          const targetAppleCount = Math.min(
+            maxApples,
+            1 + Math.floor(nextScore / pointsPerNewApple),
+          );
 
           if (updatedFoods.length < targetAppleCount) {
             const extraApple = generateSingleFoodPosition(
@@ -333,7 +340,7 @@ export default function SnakeGame() {
 
     const speed =
       gameMode === "SPEED"
-        ? Math.max(70, 200 - Math.floor(score / 30) * 4)
+        ? Math.max(75, 210 - Math.floor(score / 20) * 5)
         : 200;
 
     const interval = setInterval(moveSnake, speed);
@@ -384,94 +391,48 @@ export default function SnakeGame() {
     setFoods([{ x: 10, y: 10 }]);
   };
 
-  // Explicit Corner Radii Calculation for Head
-  const getHeadCornerRadii = () => {
-    const half = CELL_SIZE / 2;
-    if (direction.x === 1) {
+  const BODY_RATIO = 0.82;
+  const BODY_SIZE = CELL_SIZE * BODY_RATIO;
+  const OFFSET = (CELL_SIZE - BODY_SIZE) / 2;
+
+  // Helper for Seamless Connections Across Head, Body, and Tail
+  const getConnections = (index: number) => {
+    const current = snake[index];
+    const prev = snake[index - 1];
+    const next = snake[index + 1];
+
+    const isConnectedTo = (other?: Point) => {
+      if (!other)
+        return { left: false, right: false, top: false, bottom: false };
       return {
-        borderTopRightRadius: half,
-        borderBottomRightRadius: half,
-        borderTopLeftRadius: 0,
-        borderBottomLeftRadius: 0,
+        left: other.x < current.x,
+        right: other.x > current.x,
+        top: other.y < current.y,
+        bottom: other.y > current.y,
       };
-    }
-    if (direction.x === -1) {
-      return {
-        borderTopLeftRadius: half,
-        borderBottomLeftRadius: half,
-        borderTopRightRadius: 0,
-        borderBottomRightRadius: 0,
-      };
-    }
-    if (direction.y === -1) {
-      return {
-        borderTopLeftRadius: half,
-        borderTopRightRadius: half,
-        borderBottomLeftRadius: 0,
-        borderBottomRightRadius: 0,
-      };
-    }
-    if (direction.y === 1) {
-      return {
-        borderBottomLeftRadius: half,
-        borderBottomRightRadius: half,
-        borderTopLeftRadius: 0,
-        borderTopRightRadius: 0,
-      };
-    }
+    };
+
+    const c1 = isConnectedTo(prev);
+    const c2 = isConnectedTo(next);
+
     return {
-      borderTopRightRadius: half,
-      borderBottomRightRadius: half,
+      left: c1.left || c2.left,
+      right: c1.right || c2.right,
+      top: c1.top || c2.top,
+      bottom: c1.bottom || c2.bottom,
     };
   };
 
-  // Explicit Corner Radii Calculation for Tail
-  const getTailCornerRadii = () => {
-    const half = CELL_SIZE / 2;
-    if (snake.length < 2) return { borderRadius: half };
-    const tail = snake[snake.length - 1];
-    const prev = snake[snake.length - 2];
-
-    const dx = tail.x - prev.x;
-    const dy = tail.y - prev.y;
-
-    if (dx === 1) {
-      return {
-        borderTopRightRadius: half,
-        borderBottomRightRadius: half,
-        borderTopLeftRadius: 0,
-        borderBottomLeftRadius: 0,
-      };
-    }
-    if (dx === -1) {
-      return {
-        borderTopLeftRadius: half,
-        borderBottomLeftRadius: half,
-        borderTopRightRadius: 0,
-        borderBottomRightRadius: 0,
-      };
-    }
-    if (dy === 1) {
-      return {
-        borderBottomLeftRadius: half,
-        borderBottomRightRadius: half,
-        borderTopLeftRadius: 0,
-        borderTopRightRadius: 0,
-      };
-    }
-    if (dy === -1) {
-      return {
-        borderTopLeftRadius: half,
-        borderTopRightRadius: half,
-        borderBottomLeftRadius: 0,
-        borderBottomRightRadius: 0,
-      };
-    }
-    return { borderRadius: half };
-  };
+  const isGestureActive =
+    !isMenuOpen && !isGameOver && !isInHome && !isModeModalOpen;
 
   return (
-    <SafeAreaView style={styles.container} {...panResponder.panHandlers}>
+    <View
+      style={styles.container}
+      {...(isGestureActive ? panResponder.panHandlers : {})}
+    >
+      <StatusBar style="light" />
+
       {/* Background Floating Ambient Particles / Bubbles */}
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
         {backgroundParticles.map((p) => (
@@ -510,39 +471,40 @@ export default function SnakeGame() {
         </View>
       ) : (
         <>
-          {/* Score Header Capsule with Menu Gear Icon */}
-          <View style={[styles.scoreCapsule, { width: TOTAL_WIDTH }]}>
-            <View style={styles.scoreGroup}>
-              <Text
-                style={[
-                  styles.scoreText,
-                  { fontSize: CELL_SIZE > 24 ? 18 : 14 },
-                ]}
-              >
-                SCORE: {score}
-              </Text>
-              <View style={styles.divider} />
-              <Text
-                style={[
-                  styles.highScoreText,
-                  { fontSize: CELL_SIZE > 24 ? 18 : 14 },
-                ]}
-              >
-                BEST: {highScore}
-              </Text>
-              <View style={styles.divider} />
-              <Text style={styles.modeBadgeText}>
-                {gameMode === "SPEED" ? "SPEED" : "CHILL"}
-              </Text>
+          {/* Header Row */}
+          <View style={[styles.headerRow, { width: TOTAL_WIDTH }]}>
+            <View style={styles.scoreCardsContainer}>
+              <View style={styles.scoreCard}>
+                <Text
+                  style={[
+                    styles.scoreText,
+                    { fontSize: CELL_SIZE > 24 ? 14 : 12 },
+                  ]}
+                >
+                  SCORE: {score}
+                </Text>
+              </View>
+
+              <View style={styles.scoreCard}>
+                <Text
+                  style={[
+                    styles.highScoreText,
+                    { fontSize: CELL_SIZE > 24 ? 14 : 12 },
+                  ]}
+                >
+                  BEST: {highScore}
+                </Text>
+              </View>
             </View>
 
-            {/* Cyber Menu / Gear Button */}
             <TouchableOpacity
-              style={styles.menuIconButton}
+              style={styles.hamburgerButton}
               onPress={() => setIsMenuOpen(true)}
               activeOpacity={0.7}
             >
-              <Text style={styles.gearIcon}>⚙️</Text>
+              <View style={styles.hamburgerLine} />
+              <View style={styles.hamburgerLine} />
+              <View style={styles.hamburgerLine} />
             </TouchableOpacity>
           </View>
 
@@ -574,119 +536,169 @@ export default function SnakeGame() {
                 />
               ))}
 
-              {/* Cyber Snake Rendering - Perfectly rounded Pill Head & Tail */}
+              {/* Seamless Connected Snake Rendering */}
               {snake.map((segment, index) => {
                 const isHead = index === 0;
                 const isTail = index === snake.length - 1;
 
-                if (isHead) {
-                  const eyeSize = Math.max(4, Math.floor(CELL_SIZE * 0.22));
-                  const pupilSize = Math.max(2, Math.floor(eyeSize * 0.5));
-                  const eyeOffset = Math.max(3, Math.floor(CELL_SIZE * 0.18));
+                const baseLeft = segment.x * CELL_SIZE + OFFSET;
+                const baseTop = segment.y * CELL_SIZE + OFFSET;
+                const conn = getConnections(index);
 
+                if (isHead) {
+                  const radius = BODY_SIZE / 2;
+                  const eyeSize = Math.max(3, Math.floor(BODY_SIZE * 0.22));
+                  const eyeOffset = Math.max(2, Math.floor(BODY_SIZE * 0.18));
+
+                  let headRadii = {};
                   let rotationAngle = "0deg";
-                  if (direction.x === -1) rotationAngle = "180deg";
-                  if (direction.y === -1) rotationAngle = "270deg";
-                  if (direction.y === 1) rotationAngle = "90deg";
+
+                  if (direction.x === 1) {
+                    headRadii = {
+                      borderTopRightRadius: radius,
+                      borderBottomRightRadius: radius,
+                    };
+                    rotationAngle = "0deg";
+                  } else if (direction.x === -1) {
+                    headRadii = {
+                      borderTopLeftRadius: radius,
+                      borderBottomLeftRadius: radius,
+                    };
+                    rotationAngle = "180deg";
+                  } else if (direction.y === -1) {
+                    headRadii = {
+                      borderTopLeftRadius: radius,
+                      borderTopRightRadius: radius,
+                    };
+                    rotationAngle = "270deg";
+                  } else if (direction.y === 1) {
+                    headRadii = {
+                      borderBottomLeftRadius: radius,
+                      borderBottomRightRadius: radius,
+                    };
+                    rotationAngle = "90deg";
+                  }
 
                   return (
                     <View
                       key={index}
                       style={[
-                        styles.snakeSegmentContainer,
+                        styles.snakeSegment,
+                        headRadii,
                         {
-                          width: CELL_SIZE,
-                          height: CELL_SIZE,
-                          left: segment.x * CELL_SIZE,
-                          top: segment.y * CELL_SIZE,
+                          width:
+                            BODY_SIZE +
+                            (conn.left ? OFFSET : 0) +
+                            (conn.right ? OFFSET : 0),
+                          height:
+                            BODY_SIZE +
+                            (conn.top ? OFFSET : 0) +
+                            (conn.bottom ? OFFSET : 0),
+                          left: baseLeft - (conn.left ? OFFSET : 0),
+                          top: baseTop - (conn.top ? OFFSET : 0),
+                          borderLeftWidth: conn.left ? 0 : 1.5,
+                          borderRightWidth: conn.right ? 0 : 1.5,
+                          borderTopWidth: conn.top ? 0 : 1.5,
+                          borderBottomWidth: conn.bottom ? 0 : 1.5,
+                          zIndex: 5,
                         },
                       ]}
                     >
                       <View
-                        style={[styles.snakeHeadShape, getHeadCornerRadii()]}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          position: "relative",
+                          transform: [{ rotate: rotationAngle }],
+                        }}
                       >
+                        {/* Snake Eyes */}
                         <View
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            position: "relative",
-                            transform: [{ rotate: rotationAngle }],
-                          }}
-                        >
-                          <View
-                            style={[
-                              styles.eyeTop,
-                              {
-                                top: eyeOffset,
-                                right: eyeOffset + 2,
-                                width: eyeSize,
-                                height: eyeSize,
-                                borderRadius: eyeSize / 2,
-                              },
-                            ]}
-                          >
-                            <View
-                              style={[
-                                styles.pupil,
-                                {
-                                  width: pupilSize,
-                                  height: pupilSize,
-                                  borderRadius: pupilSize / 2,
-                                },
-                              ]}
-                            />
-                          </View>
-                          <View
-                            style={[
-                              styles.eyeBottom,
-                              {
-                                bottom: eyeOffset,
-                                right: eyeOffset + 2,
-                                width: eyeSize,
-                                height: eyeSize,
-                                borderRadius: eyeSize / 2,
-                              },
-                            ]}
-                          >
-                            <View
-                              style={[
-                                styles.pupil,
-                                {
-                                  width: pupilSize,
-                                  height: pupilSize,
-                                  borderRadius: pupilSize / 2,
-                                },
-                              ]}
-                            />
-                          </View>
-                          <View style={styles.tongueLine}>
-                            <View style={styles.forkTop} />
-                            <View style={styles.forkBottom} />
-                          </View>
-                        </View>
+                          style={[
+                            styles.eyeTop,
+                            {
+                              top: eyeOffset,
+                              right: eyeOffset + 1,
+                              width: eyeSize,
+                              height: eyeSize,
+                              borderRadius: eyeSize / 2,
+                            },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.eyeBottom,
+                            {
+                              bottom: eyeOffset,
+                              right: eyeOffset + 1,
+                              width: eyeSize,
+                              height: eyeSize,
+                              borderRadius: eyeSize / 2,
+                            },
+                          ]}
+                        />
+
+                        {/* Single-Line Straight Tongue */}
+                        <View style={styles.singleTongueLine} />
                       </View>
                     </View>
                   );
                 }
 
                 if (isTail) {
+                  const radius = BODY_SIZE / 2;
+                  const prev = snake[index - 1];
+                  const dx = segment.x - prev.x;
+                  const dy = segment.y - prev.y;
+
+                  let tailRadii = {};
+                  if (dx === 1) {
+                    tailRadii = {
+                      borderTopRightRadius: radius,
+                      borderBottomRightRadius: radius,
+                    };
+                  } else if (dx === -1) {
+                    tailRadii = {
+                      borderTopLeftRadius: radius,
+                      borderBottomLeftRadius: radius,
+                    };
+                  } else if (dy === 1) {
+                    tailRadii = {
+                      borderBottomLeftRadius: radius,
+                      borderBottomRightRadius: radius,
+                    };
+                  } else if (dy === -1) {
+                    tailRadii = {
+                      borderTopLeftRadius: radius,
+                      borderTopRightRadius: radius,
+                    };
+                  }
+
                   return (
                     <View
                       key={index}
                       style={[
-                        styles.snakeSegmentContainer,
+                        styles.snakeSegment,
+                        tailRadii,
                         {
-                          width: CELL_SIZE,
-                          height: CELL_SIZE,
-                          left: segment.x * CELL_SIZE,
-                          top: segment.y * CELL_SIZE,
+                          width:
+                            BODY_SIZE +
+                            (conn.left ? OFFSET : 0) +
+                            (conn.right ? OFFSET : 0),
+                          height:
+                            BODY_SIZE +
+                            (conn.top ? OFFSET : 0) +
+                            (conn.bottom ? OFFSET : 0),
+                          left: baseLeft - (conn.left ? OFFSET : 0),
+                          top: baseTop - (conn.top ? OFFSET : 0),
+                          borderLeftWidth: conn.left ? 0 : 1.5,
+                          borderRightWidth: conn.right ? 0 : 1.5,
+                          borderTopWidth: conn.top ? 0 : 1.5,
+                          borderBottomWidth: conn.bottom ? 0 : 1.5,
+                          zIndex: 2,
                         },
                       ]}
-                    >
-                      <View
-                        style={[styles.snakeTailShape, getTailCornerRadii()]}
-                      />
-                    </View>
+                    />
                   );
                 }
 
@@ -694,12 +706,23 @@ export default function SnakeGame() {
                   <View
                     key={index}
                     style={[
-                      styles.snakeBodyShape,
+                      styles.snakeSegment,
                       {
-                        width: CELL_SIZE,
-                        height: CELL_SIZE,
-                        left: segment.x * CELL_SIZE,
-                        top: segment.y * CELL_SIZE,
+                        width:
+                          BODY_SIZE +
+                          (conn.left ? OFFSET : 0) +
+                          (conn.right ? OFFSET : 0),
+                        height:
+                          BODY_SIZE +
+                          (conn.top ? OFFSET : 0) +
+                          (conn.bottom ? OFFSET : 0),
+                        left: baseLeft - (conn.left ? OFFSET : 0),
+                        top: baseTop - (conn.top ? OFFSET : 0),
+                        borderLeftWidth: conn.left ? 0 : 1.5,
+                        borderRightWidth: conn.right ? 0 : 1.5,
+                        borderTopWidth: conn.top ? 0 : 1.5,
+                        borderBottomWidth: conn.bottom ? 0 : 1.5,
+                        zIndex: 3,
                       },
                     ]}
                   />
@@ -769,28 +792,21 @@ export default function SnakeGame() {
         <View style={styles.modalBackdrop}>
           <View style={styles.modeModalContainer}>
             <Text style={styles.modeModalTitle}>SELECT MODE</Text>
-            <Text style={styles.modeModalSubtitle}>CHOOSE YOUR CHALLENGE</Text>
 
             <TouchableOpacity
-              style={[styles.modeCard, styles.speedCard]}
+              style={styles.modeCard}
               onPress={() => startGameWithMode("SPEED")}
               activeOpacity={0.8}
             >
-              <Text style={styles.modeCardTitle}>⚡ SPEED MODE</Text>
-              <Text style={styles.modeCardDesc}>
-                Snake gets faster after eating apples!
-              </Text>
+              <Text style={styles.modeCardTitle}>SPEED MODE</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.modeCard, styles.chillCard]}
+              style={styles.modeCard}
               onPress={() => startGameWithMode("CHILL")}
               activeOpacity={0.8}
             >
-              <Text style={styles.modeCardTitle}>☕ CHILL MODE</Text>
-              <Text style={styles.modeCardDesc}>
-                Relaxed constant speed for endless fun!
-              </Text>
+              <Text style={styles.modeCardTitle}>CHILL MODE</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -838,7 +854,7 @@ export default function SnakeGame() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -848,31 +864,28 @@ const styles = StyleSheet.create({
     backgroundColor: "#030712",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 12,
   },
 
-  // Home Screen Styles
   homeContainer: {
     alignItems: "center",
     justifyContent: "center",
     zIndex: 10,
   },
   homeTitle: {
-    fontSize: 36,
-    fontWeight: "900",
+    fontSize: 42,
     color: "#06d474",
     letterSpacing: 4,
     marginBottom: 40,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
-    textShadowColor: "rgba(6, 212, 116, 0.6)",
+    fontFamily: "CyberFont",
+    textShadowColor: "rgba(6, 212, 116, 0.8)",
     textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 15,
+    textShadowRadius: 18,
   },
   playButton: {
     backgroundColor: "#06d474",
     paddingHorizontal: 48,
     paddingVertical: 18,
-    borderRadius: 50,
+    borderRadius: CORNER_RADIUS,
     borderWidth: 2,
     borderColor: "#34d399",
     shadowColor: "#06d474",
@@ -884,17 +897,15 @@ const styles = StyleSheet.create({
   playButtonText: {
     color: "#030712",
     fontSize: 20,
-    fontWeight: "900",
     letterSpacing: 2,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontFamily: "CyberFont",
   },
 
-  // Mode Selection Popup Modal
   modeModalContainer: {
     width: "85%",
     maxWidth: 320,
     backgroundColor: "#0a131a",
-    borderRadius: 20,
+    borderRadius: CORNER_RADIUS,
     borderWidth: 2,
     borderColor: "#06d474",
     padding: 24,
@@ -906,45 +917,27 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   modeModalTitle: {
-    fontSize: 22,
-    fontWeight: "900",
+    fontSize: 20,
     color: "#06d474",
     letterSpacing: 2,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
-  },
-  modeModalSubtitle: {
-    fontSize: 11,
-    color: "#64748b",
-    marginBottom: 20,
-    letterSpacing: 1,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontFamily: "CyberFont",
+    marginBottom: 23,
   },
   modeCard: {
     width: "100%",
     padding: 16,
-    borderRadius: 12,
+    borderRadius: CORNER_RADIUS,
     borderWidth: 1,
-    marginBottom: 12,
-  },
-  speedCard: {
-    backgroundColor: "rgba(6, 212, 116, 0.1)",
     borderColor: "#06d474",
-  },
-  chillCard: {
-    backgroundColor: "rgba(56, 189, 248, 0.1)",
-    borderColor: "#38bdf8",
+    backgroundColor: "rgba(10, 19, 26, 0.9)",
+    marginBottom: 12,
+    alignItems: "center",
   },
   modeCardTitle: {
-    fontSize: 16,
-    fontWeight: "900",
-    color: "#ffffff",
-    marginBottom: 4,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
-  },
-  modeCardDesc: {
-    fontSize: 12,
-    color: "#94a3b8",
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontSize: 15,
+    color: "#4ade80",
+    marginBottom: 6,
+    fontFamily: "CyberFont",
   },
   cancelButton: {
     marginTop: 8,
@@ -952,75 +945,74 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     color: "#64748b",
-    fontSize: 13,
-    fontWeight: "700",
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontSize: 12,
+    fontFamily: "CyberFont",
   },
 
-  // Score Header Capsule
-  scoreCapsule: {
+  headerRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 8,
-    paddingHorizontal: 16,
     marginBottom: 16,
-    borderRadius: 50,
+    gap: 12,
+    zIndex: 10,
+  },
+  scoreCardsContainer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  scoreCard: {
+    flex: 1,
+    height: 42,
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: CORNER_RADIUS,
     borderWidth: BORDER_WIDTH,
     borderColor: "#06d474",
     backgroundColor: "#0a131a",
     shadowColor: "#06d474",
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
+    shadowOpacity: 0.4,
     shadowRadius: 10,
     elevation: 8,
-    zIndex: 10,
-  },
-  scoreGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  divider: {
-    width: 2,
-    height: 16,
-    backgroundColor: "rgba(6, 212, 116, 0.3)",
   },
   scoreText: {
     color: "#4ade80",
-    fontWeight: "800",
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontFamily: "CyberFont",
   },
   highScoreText: {
     color: "#f59e0b",
-    fontWeight: "800",
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
-  },
-  modeBadgeText: {
-    color: "#38bdf8",
-    fontWeight: "800",
-    fontSize: 12,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontFamily: "CyberFont",
   },
 
-  // Menu Button
-  menuIconButton: {
-    backgroundColor: "#102a20",
-    borderRadius: 20,
-    padding: 6,
-    borderWidth: 1,
+  hamburgerButton: {
+    width: 42,
+    height: 42,
+    backgroundColor: "#0a131a",
+    borderRadius: CORNER_RADIUS,
+    borderWidth: BORDER_WIDTH,
     borderColor: "#06d474",
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
+    gap: 5,
+    shadowColor: "#06d474",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 8,
   },
-  gearIcon: {
-    fontSize: 16,
+  hamburgerLine: {
+    width: 20,
+    height: 3,
+    backgroundColor: "#06d474",
+    borderRadius: 2,
   },
 
-  // Board
   board: {
     position: "relative",
-    borderRadius: 8,
+    borderRadius: CORNER_RADIUS,
     borderWidth: BORDER_WIDTH,
     borderColor: "#06d474",
     overflow: "hidden",
@@ -1032,81 +1024,32 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
 
-  snakeSegmentContainer: {
+  // Shared Unified Snake Segment Style
+  snakeSegment: {
     position: "absolute",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 5,
+    backgroundColor: "#059669",
+    borderColor: "#34d399",
   },
 
-  snakeHeadShape: {
-    width: "100%",
-    height: "100%",
-    backgroundColor: "#10b981",
-    borderWidth: 1,
-    borderColor: "#a7f3d0",
-    position: "relative",
-    overflow: "hidden",
-  },
   eyeTop: {
     position: "absolute",
-    backgroundColor: "#ffffff",
-    justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: "#030712",
   },
   eyeBottom: {
     position: "absolute",
-    backgroundColor: "#ffffff",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  pupil: {
     backgroundColor: "#030712",
   },
-  tongueLine: {
+
+  // Single-Line Tongue
+  singleTongueLine: {
     position: "absolute",
     right: -5,
     top: "50%",
     marginTop: -1,
-    width: 6,
+    width: 5,
     height: 2,
     backgroundColor: "#ec4899",
-  },
-  forkTop: {
-    position: "absolute",
-    right: 0,
-    top: -2,
-    width: 3,
-    height: 2,
-    backgroundColor: "#ec4899",
-    transform: [{ rotate: "-45deg" }],
-  },
-  forkBottom: {
-    position: "absolute",
-    right: 0,
-    bottom: -2,
-    width: 3,
-    height: 2,
-    backgroundColor: "#ec4899",
-    transform: [{ rotate: "45deg" }],
-  },
-
-  snakeBodyShape: {
-    position: "absolute",
-    backgroundColor: "#059669",
-    borderWidth: 1,
-    borderColor: "#34d399",
-    borderRadius: 0,
-    zIndex: 2,
-  },
-
-  snakeTailShape: {
-    width: "100%",
-    height: "100%",
-    backgroundColor: "#059669",
-    borderWidth: 1,
-    borderColor: "#34d399",
-    overflow: "hidden",
+    borderRadius: 1,
   },
 
   foodApple: {
@@ -1144,35 +1087,35 @@ const styles = StyleSheet.create({
   },
   gameOverTitle: {
     fontSize: 28,
-    fontWeight: "900",
     color: "#f43f5e",
     marginBottom: 8,
     letterSpacing: 2,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontFamily: "CyberFont",
+    textShadowColor: "rgba(244, 63, 94, 0.8)",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 15,
   },
   finalScore: {
-    fontSize: 16,
+    fontSize: 14,
     color: "#94a3b8",
     marginBottom: 20,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontFamily: "CyberFont",
   },
   button: {
     backgroundColor: "#06d474",
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 4,
+    borderRadius: CORNER_RADIUS,
     borderWidth: 1,
     borderColor: "#06d474",
   },
   buttonText: {
     color: "#030712",
-    fontSize: 15,
-    fontWeight: "900",
+    fontSize: 14,
     letterSpacing: 1,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontFamily: "CyberFont",
   },
 
-  // Borderless Overlay Menu Styles
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(3, 7, 18, 0.85)",
@@ -1186,22 +1129,24 @@ const styles = StyleSheet.create({
   },
   menuTitle: {
     fontSize: 28,
-    fontWeight: "900",
     color: "#06d474",
     letterSpacing: 3,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontFamily: "CyberFont",
+    textShadowColor: "rgba(6, 212, 116, 0.8)",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 15,
   },
   menuSubtitle: {
-    fontSize: 12,
+    fontSize: 10,
     color: "#64748b",
     marginBottom: 32,
     letterSpacing: 1.5,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontFamily: "CyberFont",
   },
   menuBtn: {
     width: "100%",
     paddingVertical: 14,
-    borderRadius: 8,
+    borderRadius: CORNER_RADIUS,
     alignItems: "center",
     marginBottom: 16,
     borderWidth: 1,
@@ -1212,10 +1157,9 @@ const styles = StyleSheet.create({
   },
   resumeBtnText: {
     color: "#030712",
-    fontSize: 15,
-    fontWeight: "900",
+    fontSize: 14,
     letterSpacing: 1,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontFamily: "CyberFont",
   },
   restartBtn: {
     backgroundColor: "rgba(10, 19, 26, 0.9)",
@@ -1223,10 +1167,9 @@ const styles = StyleSheet.create({
   },
   restartBtnText: {
     color: "#4ade80",
-    fontSize: 15,
-    fontWeight: "900",
+    fontSize: 14,
     letterSpacing: 1,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontFamily: "CyberFont",
   },
   homeBtn: {
     backgroundColor: "rgba(10, 19, 26, 0.9)",
@@ -1235,9 +1178,8 @@ const styles = StyleSheet.create({
   },
   homeBtnText: {
     color: "#f59e0b",
-    fontSize: 15,
-    fontWeight: "900",
+    fontSize: 14,
     letterSpacing: 1,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontFamily: "CyberFont",
   },
 });
